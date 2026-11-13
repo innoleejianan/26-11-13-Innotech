@@ -127,6 +127,31 @@
     box-shadow:0 12px 32px rgba(0,0,0,.5); transition:opacity .2s, transform .2s; }
   #toast.show { display:block; opacity:1; transform:translateX(-50%) translateY(0); }
   @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+
+
+  /* ===== 手机版 ===== */
+  @media (max-width: 640px) {
+    header { padding:12px 12px 10px; }
+    nav { flex-wrap:nowrap; }
+    .ntab { flex:1; justify-content:center; padding:9px 8px; font-size:14px; }
+    main { margin:14px auto; padding:0 12px; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .stat { min-width:0; padding:12px 10px; }
+    .stat .v { font-size:24px; }
+    .stat .l { font-size:11.5px; }
+    section { padding:14px; }
+    section h2 { flex-wrap:wrap; font-size:15px; }
+    section h2 small { flex-basis:100%; margin-left:0; font-size:12px; }
+    .row { font-size:14px; }
+    .row .hookline { flex-basis:100%; min-width:0; white-space:normal; }
+    .pill { font-size:12.5px; padding:0 12px; min-height:38px; }
+    .act { font-size:13px; flex-wrap:wrap; }
+    #mission .md { font-size:13.5px; }
+    #radarWrap { height:calc(100vh - 130px); min-height:420px; border-radius:12px; }
+    .sop ol { font-size:14px; margin-left:18px; }
+    .sop table { display:block; overflow-x:auto; }
+    #toast { width:calc(100% - 32px); text-align:center; }
+  }
 </style>
 </head>
 <body>

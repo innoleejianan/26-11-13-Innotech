@@ -296,6 +296,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     padding: 8px 11px; border-radius: 0 10px 10px 0; font-size: 12px; line-height: 1.65;
     color: var(--muted); cursor: pointer; display: -webkit-box; -webkit-line-clamp: 4;
     -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+  .mine:not(.open) { padding-bottom: 0; border-bottom: 9px solid transparent; }
   .mine.open { -webkit-line-clamp: unset; }
   .mine b { color: var(--green); font-weight: 600; }
 
@@ -334,6 +335,56 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
+  }
+
+  /* ===== 手机版 ===== */
+  @media (max-width: 640px) {
+    /* 顶部不再固定 —— 原本筛选栏占掉半个屏幕 */
+    header { position: relative; padding: 12px 12px 10px; }
+    .hrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .brand { grid-column: 1 / -1; margin-right: 0; min-width: 0; }
+    h1 { font-size: 16px; white-space: normal; }
+    h1 small { font-size: 11px; margin-top: 2px; }
+    .search { grid-column: 1 / -1; }
+    input#fSearch { width: 100%; font-size: 16px; padding: 10px 12px 10px 34px; }
+    select, .btn { font-size: 14px; padding: 9px 10px; min-height: 42px; min-width: 0; width: 100%; }
+    #fSort { grid-column: 1 / -1; }
+    .hrow .btn { justify-content: center; }
+
+    /* tab / 快筛 / 热词:单行横向滑动,不再堆成好几行 */
+    .tabs, .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+      margin-left: -12px; margin-right: -12px; padding: 0 12px; -webkit-overflow-scrolling: touch; }
+    .tabs::-webkit-scrollbar, .chips::-webkit-scrollbar { display: none; }
+    .tabs { margin-top: 10px; }
+    .tab { flex: none; font-size: 14px; padding: 8px 14px; }
+    .chip2 { flex: none; font-size: 13px; padding: 7px 12px; }
+    .chips .lbl { flex: none; font-size: 12.5px; }
+
+    main { margin: 14px auto; padding: 0 12px; }
+    .grid { grid-template-columns: 1fr; gap: 14px; }
+    .card:hover { transform: none; }
+
+    /* 卡片文字放大一点,手机更好读 */
+    .meta { padding: 14px 14px 15px; gap: 11px; }
+    .row1 { font-size: 14px; }
+    .badge { font-size: 11.5px; padding: 3px 9px; }
+    .date { font-size: 12px; }
+    .num { font-size: 12px; padding: 6px 9px; }
+    .num b { font-size: 13.5px; }
+    .cap { font-size: 14px; line-height: 1.65; }
+    .ai, .mine { font-size: 13.5px; line-height: 1.7; padding: 10px 12px; }
+
+    /* 状态 + 按钮:状态一行,按钮平均分一行,不再超出屏幕 */
+    .srow { display: flex; flex-wrap: wrap; gap: 6px; }
+    .srow label { display: none; }
+    .srow .status { flex: 1 1 100%; font-size: 14px; min-height: 42px; }
+    .abtn { flex: 1 1 0; justify-content: center; font-size: 12.5px; padding: 0 4px; min-height: 40px; gap: 4px; white-space: nowrap; }
+    a.abtn { flex: 0 0 40px; }
+    .abtn .ic { width: 14px; height: 14px; }
+
+    .more button { width: 100%; padding: 13px; }
+    footer { padding: 18px 16px 28px; line-height: 1.6; }
+    #toast { width: calc(100% - 32px); text-align: center; bottom: 20px; }
   }
 </style>
 </head>
@@ -803,6 +854,30 @@ TEAM_TEMPLATE = """<!DOCTYPE html>
     box-shadow:0 12px 32px rgba(0,0,0,.5); transition:opacity .2s, transform .2s; }
   #toast.show { display:block; opacity:1; transform:translateX(-50%) translateY(0); }
   @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+
+  /* ===== 手机版 ===== */
+  @media (max-width: 640px) {
+    header { padding:12px 12px 10px; }
+    nav { flex-wrap:nowrap; }
+    .ntab { flex:1; justify-content:center; padding:9px 8px; font-size:14px; }
+    main { margin:14px auto; padding:0 12px; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .stat { min-width:0; padding:12px 10px; }
+    .stat .v { font-size:24px; }
+    .stat .l { font-size:11.5px; }
+    section { padding:14px; }
+    section h2 { flex-wrap:wrap; font-size:15px; }
+    section h2 small { flex-basis:100%; margin-left:0; font-size:12px; }
+    .row { font-size:14px; }
+    .row .hookline { flex-basis:100%; min-width:0; white-space:normal; }
+    .pill { font-size:12.5px; padding:0 12px; min-height:38px; }
+    .act { font-size:13px; flex-wrap:wrap; }
+    #mission .md { font-size:13.5px; }
+    #radarWrap { height:calc(100vh - 130px); min-height:420px; border-radius:12px; }
+    .sop ol { font-size:14px; margin-left:18px; }
+    .sop table { display:block; overflow-x:auto; }
+    #toast { width:calc(100% - 32px); text-align:center; }
+  }
 </style>
 </head>
 <body>
