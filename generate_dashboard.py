@@ -435,7 +435,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <h1>__BRAND__<small id="updated"></small></h1>
     </div>
     <div class="search"><svg class="ic"><use href="#i-search"/></svg>
-      <input id="fSearch" placeholder="搜文案 / hashtag / 账号"></div>
+      <input id="fSearch" placeholder="搜文案 / hashtag / 账号 / facebook"></div>
     <select id="fTracker"><option value="">全部 Tracker</option></select>
     <select id="fComp"><option value="">全部 Competitor</option></select>
     <select id="fSort">
@@ -505,7 +505,9 @@ comps.forEach(c => { const o = document.createElement('option'); o.value = c; o.
 
 function matchQ(d) {
   const q = ($('fSearch').value || '').trim().toLowerCase();
-  return !q || (d.caption + ' ' + (d.tags || '') + ' ' + (d.transcript || '') + ' ' + (d.brk || '') + ' ' + d.competitor).toLowerCase().includes(q);
+  // 平台名也能搜:输入 facebook / fb / instagram / ig 就能筛平台
+  const pfWords = d.pf === 'FB' ? 'facebook fb' : 'instagram ig';
+  return !q || (d.caption + ' ' + (d.tags || '') + ' ' + (d.transcript || '') + ' ' + (d.brk || '') + ' ' + d.competitor + ' ' + pfWords).toLowerCase().includes(q);
 }
 
 function basePool() {
