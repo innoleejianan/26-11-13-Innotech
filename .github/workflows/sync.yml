@@ -21,3 +21,16 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python sync_content.py
+      # Facebook 专页:Supabase competitors 表里 tracker 填 FB 的账号。
+      # 没有 FB 竞对就自动跳过,不花钱。IG 那步失败也照样跑;
+      # FB 这步出错只会显示黄色警告,不会卡住后面的转录/拆解/网页。
+      - name: Sync Facebook competitors
+        if: always()
+        continue-on-error: true
+        env:
+          TRACKER: FB
+          FB_RESULTS_LIMIT: ${{ vars.FB_RESULTS_LIMIT }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python sync_content.py

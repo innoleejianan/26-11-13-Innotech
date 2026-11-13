@@ -27,7 +27,7 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")  # public key, baked
 # Falls back to sensible defaults so the page still builds before they're set.
 BRAND = os.environ.get("BRAND") or "爆款雷达"
 SYNC_DAY = os.environ.get("SYNC_DAY") or "每周"
-TRACKER_LABEL = {"IG": BRAND + " 竞对"}
+TRACKER_LABEL = {"IG": BRAND + " IG 竞对", "FB": BRAND + " FB 竞对"}
 STATUSES = ["未处理", "拍摄中", "已处理", "跳过"]
 
 # comment-bait CTA patterns — require an explicit gated keyword:
@@ -63,10 +63,27 @@ def fetch_posts(key):
     return rows
 
 
+def _fb_handle(n):
+    """Same as sync_content.fb_handle: a Facebook page link -> its page name."""
+    u = urllib.parse.urlparse(n if "://" in n else "https://" + n)
+    parts = [p for p in u.path.split("/") if p]
+    if parts and parts[0] == "profile.php":
+        q = urllib.parse.parse_qs(u.query).get("id")
+        return f"profile.php?id={q[0]}" if q else ""
+    if parts and parts[0] in ("pg", "people") and len(parts) > 1:
+        parts = parts[1:]
+    if not parts or parts[0] in ("p", "posts", "reel", "watch", "groups",
+                                 "share", "photo", "story.php", "permalink.php"):
+        return ""
+    return parts[0].lstrip("@").strip().lower()
+
+
 def _handle(name):
     """Normalise a competitor handle the way sync_content.py does, so the two
     scripts always agree on what '@Nike' and 'instagram.com/nike/' mean."""
     n = (name or "").strip()
+    if "facebook.com" in n or "fb.com" in n:
+        return _fb_handle(n)
     if "instagram.com" in n:
         parts = [p for p in urllib.parse.urlparse(n).path.split("/") if p]
         if not parts or parts[0] in ("p", "reel", "reels", "stories", "tv"):
@@ -110,6 +127,7 @@ def normalize(r):
     return {
         "id": post_id,
         "tracker": TRACKER_LABEL.get(r.get("tracker"), r.get("tracker") or "AI Competitors"),
+        "pf": "FB" if r.get("tracker") == "FB" else "IG",
         "competitor": r.get("competitor") or "",
         "caption": caption,
         "transcript": tr if tr not in ("(转录失败)", "(视频不可用)", "(无口播内容)") else "",
@@ -441,7 +459,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="empty" id="empty" style="display:none"><svg class="ic"><use href="#i-search"/></svg>没有符合条件的帖子</div>
   <div class="more" id="moreWrap" style="display:none"><button id="moreBtn">载入更多</button></div>
 </main>
-<footer>数据来源 Supabase · __SYNC_DAY__自动更新 · 状态更改即时同步全团队 · 视频由 Instagram 官方 embed 播放</footer>
+<footer>数据来源 Supabase · __SYNC_DAY__自动更新 · 状态更改即时同步全团队 · 视频由 Instagram / Facebook 官方 embed 播放</footer>
 <div id="toast"></div>
 <script id="data" type="application/json">__DATA__</script>
 <script>
@@ -530,13 +548,25 @@ function renderTabs() {
   });
 }
 
+// IG 和 FB 的主页链接、内嵌播放器不一样
+function profUrl(d) {
+  return d.pf === 'FB' ? 'https://www.facebook.com/' + d.competitor
+                       : 'https://www.instagram.com/' + d.competitor + '/';
+}
+function embedSrc(d) {
+  if (d.pf === 'FB')
+    return 'https://www.facebook.com/plugins/' + (d.video ? 'video' : 'post')
+      + '.php?show_text=false&href=' + encodeURIComponent(d.url);
+  return 'https://www.instagram.com/p/' + d.id + '/embed/';
+}
+
 const io = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if (e.isIntersecting) {
-      const el = e.target, pid = el.dataset.pid;
+      const el = e.target;
       if (!el.querySelector('iframe')) {
         const f = document.createElement('iframe');
-        f.src = 'https://www.instagram.com/p/' + pid + '/embed/';
+        f.src = el.dataset.src;
         f.loading = 'lazy'; f.allow = 'autoplay; encrypted-media';
         el.appendChild(f);
       }
@@ -585,11 +615,11 @@ function card(d, idx) {
   const hook = lines[0] || '';
   const tr = (d.transcript && d.transcript !== '(转录失败)' && d.transcript !== '(无口播内容)') ? d.transcript : '';
   el.innerHTML = `
-    <div class="embed" data-pid="${d.id}"><div class="ph"><svg class="ic"><use href="#i-${typeIcon}"/></svg></div></div>
+    <div class="embed" data-src="${esc(embedSrc(d))}"><div class="ph"><svg class="ic"><use href="#i-${typeIcon}"/></svg></div></div>
     <div class="meta">
       <div class="row1">
         <span class="handle" title="拖到上方 tab 即可归类">${I('grip')}</span>
-        <a class="who" href="https://www.instagram.com/${d.competitor}/" target="_blank">@${d.competitor}</a>
+        <a class="who" href="${esc(profUrl(d))}" target="_blank">${d.pf === 'FB' ? '<span class="badge">FB</span> ' : ''}@${d.competitor}</a>
         <span class="badge">${d.type || '-'}</span>
         ${days !== null && days <= 7 ? '<span class="badge bnew">' + I('star') + '新帖</span>' : ''}
         ${horse ? '<span class="badge bhorse">' + I('zap') + '黑马</span>' : ''}
@@ -612,7 +642,7 @@ function card(d, idx) {
         ${tr ? '<button class="abtn mic" title="复制视频口播逐字稿">' + I('mic') + '口播</button>' : ''}
         ${d.my ? '<button class="abtn minec" title="复制我的改写口播稿(可直接拍)">' + I('mic') + '我的稿</button>' : ''}
         <button class="abtn brief" title="复制拍摄 Brief(数据+Hook+AI拆解+我的稿+口播稿+文案)">${I('clip')}Brief</button>
-        <a class="abtn" href="${d.url}" target="_blank" title="打开 Instagram 原帖">${I('ext')}</a></div>
+        <a class="abtn" href="${d.url}" target="_blank" title="打开原帖">${I('ext')}</a></div>
     </div>`;
   const capEl = el.querySelector('.cap');
   const restTxt = lines.slice(1).join('\\n');
@@ -973,8 +1003,8 @@ TEAM_TEMPLATE = """<!DOCTYPE html>
       <h3><svg class="ic"><use href="#i-user"/></svg>SOP-05 · 竞对名单管理(发现好账号就加进来)</h3>
       <ol>
         <li>打开 Supabase「<b>competitors</b>」表,加一行</li>
-        <li><b>Username</b>:贴账号名或 IG <b>主页</b>链接都行(带 ?igsh= 参数没关系;不要贴帖子链接)</li>
-        <li><b>Tracker</b>:选 IG Competitors 或 AI Competitors</li>
+        <li><b>Username</b>:贴账号名或 IG / Facebook <b>主页</b>链接都行(带 ?igsh= 参数没关系;不要贴帖子链接)</li>
+        <li><b>Tracker</b>:IG 账号填 <b>IG</b>,Facebook 专页填 <b>FB</b></li>
         <li><b>Active</b>:打勾✅ — <b>没勾不会抓</b></li>
         <li>每周一自动生效;停止追踪 = 取消勾,不用删行</li>
       </ol>
@@ -1019,6 +1049,8 @@ document.getElementById('updated').textContent = '数据更新于 __UPDATED__';
 const $ = id => document.getElementById(id);
 const I = n => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const profUrl = d => d.pf === 'FB' ? 'https://www.facebook.com/' + d.competitor
+                                   : 'https://www.instagram.com/' + d.competitor + '/';
 const fmt = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : String(n);
 const getKey = () => ANON;  // anon key is baked in — safe, can only change status
 const firstLine = c => ((c || '').split('\\n').map(l => l.trim()).filter(Boolean)[0] || '(无文案)');
@@ -1129,7 +1161,7 @@ function renderWork() {
   if (!shoot.length) sl.innerHTML = '<div class="none">队列是空的 — Marketer 去爆款雷达挑几条拖进「拍摄中」</div>';
   shoot.forEach(d => {
     const r = document.createElement('div'); r.className = 'row';
-    r.innerHTML = '<a class="who2" href="https://www.instagram.com/' + d.competitor + '/" target="_blank">@' + esc(d.competitor) + '</a>'
+    r.innerHTML = '<a class="who2" href="' + esc(profUrl(d)) + '" target="_blank">@' + esc(d.competitor) + '</a>'
       + ((d.x || 0) >= 2 ? '<span class="xb">×' + d.x + '</span>' : '')
       + '<span class="hookline">' + esc(firstLine(d.caption)) + '</span>'
       + '<a class="pill" href="' + d.url + '" target="_blank">' + I('ext') + '原帖</a>'
@@ -1147,7 +1179,7 @@ function renderWork() {
   picks.forEach(d => {
     const r = document.createElement('div'); r.className = 'row';
     r.innerHTML = '<span class="xb">×' + d.x + '</span>'
-      + '<a class="who2" href="https://www.instagram.com/' + d.competitor + '/" target="_blank">@' + esc(d.competitor) + '</a>'
+      + '<a class="who2" href="' + esc(profUrl(d)) + '" target="_blank">@' + esc(d.competitor) + '</a>'
       + '<span class="hookline">' + esc(firstLine(d.caption))
       + '<small>🔥' + d.score + ' · ER ' + d.er + '% · 💬' + fmt(d.comments) + '</small></span>'
       + '<a class="pill" href="' + d.url + '" target="_blank">' + I('ext') + '原帖</a>'

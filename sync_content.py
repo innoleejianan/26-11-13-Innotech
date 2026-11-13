@@ -25,7 +25,11 @@ CDN links let previously skipped videos transcribe); status / transcript /
 ai_breakdown are never in the payload, so worked rows are never clobbered.
 engagement_rate and viral_score are generated columns — never written.
 
-Env (required): TRACKER ("IG" or "AI"), APIFY_TOKEN, SUPABASE_URL,
+TRACKER=FB scrapes Facebook pages instead (competitors rows with tracker
+'FB'; username is the page name or link). FB post ids are stored as
+'fb_<postId>' so they never collide with IG shortcodes.
+
+Env (required): TRACKER ("IG", "FB" or "AI"), APIFY_TOKEN, SUPABASE_URL,
                 SUPABASE_SERVICE_ROLE_KEY
 Env (tuning, all optional -- set as GitHub Actions *Variables*):
      MIN_ER (0.02)  MIN_COMMENTS (15)  MIN_ENGAGE (20)  OUTLIER_X (1.5)
@@ -75,6 +79,9 @@ MAX_PER_COMP   = _envi("MAX_PER_COMP", 15)    # cap per account, so one big
                                               # account cannot flood the board
 DAYS_BACK      = _envi("DAYS_BACK", 60)       # lookback window (free volume)
 RESULTS_LIMIT  = _envi("RESULTS_LIMIT", 50)   # posts scraped per account (costs $)
+# Facebook posts cost more per post on Apify (~$0.007 with the date filter on
+# the free plan, vs IG's much lower rate), so FB scrapes fewer by default.
+FB_RESULTS_LIMIT = _envi("FB_RESULTS_LIMIT", 20)
 MAX_ROWS       = _envi("MAX_ROWS", 2500)      # dashboard payload cap
 
 
@@ -116,11 +123,39 @@ def sb(path, method="GET", data=None, prefer=None):
 # ---------------------------------------------------------------------------
 
 
+def fb_handle(n):
+    """Normalise a Facebook page given as a name or link to the part after
+    facebook.com/, lower-cased: 'InnotechCCTV', '@innotechcctv' and
+    'https://www.facebook.com/innotechcctv/' all become 'innotechcctv'.
+    Numeric pages keep their id: 'profile.php?id=123'."""
+    n = (n or "").strip()
+    if "facebook.com" in n or "fb.com" in n:
+        u = urllib.parse.urlparse(n if "://" in n else "https://" + n)
+        parts = [p for p in u.path.split("/") if p]
+        if parts and parts[0] == "profile.php":
+            q = urllib.parse.parse_qs(u.query).get("id")
+            return f"profile.php?id={q[0]}" if q else ""
+        if parts and parts[0] in ("pg", "people") and len(parts) > 1:
+            parts = parts[1:]
+        if not parts or parts[0] in ("p", "posts", "reel", "watch", "groups",
+                                     "share", "photo", "story.php", "permalink.php"):
+            return ""
+        n = parts[0]
+    return n.lstrip("@").strip().lower()
+
+
 def fetch_competitors():
     rows = sb(f"competitors?select=username&tracker=eq.{TRACKER}&active=is.true")
     names = []
     for r in rows:
         n = (r.get("username") or "").strip()
+        if TRACKER == "FB":
+            h = fb_handle(n)
+            if h:
+                names.append(h)
+            else:
+                print(f"  WARNING: skipping non-page Facebook link: {n[:60]}")
+            continue
         if "instagram.com" in n:
             parts = [p for p in urllib.parse.urlparse(n).path.split("/") if p]
             if not parts or parts[0] in ("p", "reel", "reels", "stories", "tv"):
@@ -218,9 +253,20 @@ def post_type(p):
                  "Video" if p.get("isVideo") else "Image")
 
 
-def to_rows(posts, followers_map, today):
-    """Group the scrape by account, judge each account against ITSELF, and
-    guarantee every account contributes its best few posts."""
+def _rec(row):
+    """Wrap a posts-table row with the numbers the filter judges it by."""
+    likes, comments, fol = row["likes"], row["comments"], row["followers"]
+    return {
+        "row": row,
+        "eng": likes + comments,
+        "er": (likes + comments) / fol,
+        "comments": comments,
+        # same weighting the dashboard sorts by, so "top N" means the same thing
+        "score": (likes + comments * 3) / fol * 100,
+    }
+
+
+def ig_records(posts, followers_map, today):
     by_comp, nofol, broken = {}, 0, 0
     for p in posts:
         if p.get("error") or not p.get("shortCode"):
@@ -236,31 +282,130 @@ def to_rows(posts, followers_map, today):
         comments = int(p.get("commentsCount") or p.get("comments") or 0)
         pt = post_type(p)
         tags = p.get("hashtags") or []
-        by_comp.setdefault(u, []).append({
-            "row": {
-                "post_id": p["shortCode"],
-                "tracker": TRACKER,
-                "competitor": u,
-                "caption": (p.get("caption") or "")[:5000],
-                "post_type": pt,
-                "likes": likes,
-                "comments": comments,
-                "followers": fol,
-                "post_date": parse_date(p.get("timestamp")),
-                "post_url": f"https://www.instagram.com/p/{p['shortCode']}/",
-                "thumbnail_url": p.get("displayUrl") or p.get("imageUrl") or None,
-                "video_url": p.get("videoUrl") or None,
-                "hashtags": ", ".join(tags) if isinstance(tags, list) else str(tags),
-                "is_video": bool(p.get("isVideo") or pt in ("Video", "Reel")),
-                "last_synced": today,
-            },
-            "eng": likes + comments,
-            "er": (likes + comments) / fol,
+        by_comp.setdefault(u, []).append(_rec({
+            "post_id": p["shortCode"],
+            "tracker": TRACKER,
+            "competitor": u,
+            "caption": (p.get("caption") or "")[:5000],
+            "post_type": pt,
+            "likes": likes,
             "comments": comments,
-            # same weighting the dashboard sorts by, so "top N" means the same thing
-            "score": (likes + comments * 3) / fol * 100,
-        })
+            "followers": fol,
+            "post_date": parse_date(p.get("timestamp")),
+            "post_url": f"https://www.instagram.com/p/{p['shortCode']}/",
+            "thumbnail_url": p.get("displayUrl") or p.get("imageUrl") or None,
+            "video_url": p.get("videoUrl") or None,
+            "hashtags": ", ".join(tags) if isinstance(tags, list) else str(tags),
+            "is_video": bool(p.get("isVideo") or pt in ("Video", "Reel")),
+            "last_synced": today,
+        }))
+    return by_comp, nofol, broken
 
+
+# --- Facebook (apify~facebook-pages-scraper + apify~facebook-posts-scraper) ---
+
+def fb_page_url(handle):
+    return f"https://www.facebook.com/{handle}" + ("" if "?" in handle else "/")
+
+
+def fb_item_handles(item):
+    """Every way an Apify Facebook item names its page, normalised. The input
+    URL comes first: it is exactly the handle we asked for."""
+    out = []
+    for v in (item.get("inputUrl"), item.get("facebookUrl"), item.get("pageUrl"),
+              (item.get("user") or {}).get("profileUrl"), item.get("pageName")):
+        h = fb_handle(v) if v else ""
+        if h and h not in out:
+            out.append(h)
+    return out
+
+
+def fb_followers(pages):
+    followers = {}
+    for pg in pages:
+        c = int(pg.get("followers") or pg.get("likes") or 0)
+        if c:
+            for h in fb_item_handles(pg):
+                followers.setdefault(h, c)
+    return followers
+
+
+def _fb_media(p):
+    m = p.get("media")
+    return [x for x in m if isinstance(x, dict)] if isinstance(m, list) else []
+
+
+def _fb_video_url(p):
+    for src in [p] + _fb_media(p):
+        for k in ("videoUrl", "video_url", "playable_url_quality_hd", "playable_url",
+                  "browser_native_hd_url", "browser_native_sd_url"):
+            v = src.get(k)
+            if isinstance(v, str) and v.startswith("http"):
+                return v
+    return None
+
+
+def _fb_thumb(p):
+    for m in _fb_media(p):
+        img = m.get("photo_image") or m.get("image") or {}
+        v = m.get("thumbnail") or (img.get("uri") if isinstance(img, dict) else None)
+        if v:
+            return v
+    return p.get("thumbnail") or p.get("thumb") or None
+
+
+def fb_records(posts, followers_map, names, today):
+    wanted = set(names)
+    by_comp, nofol, broken = {}, 0, 0
+    for p in posts:
+        pid = str(p.get("postId") or p.get("id") or "").strip()
+        url = p.get("url") or p.get("topLevelUrl") or ""
+        if p.get("error") or not pid or not url:
+            broken += 1
+            continue
+        hs = fb_item_handles(p)
+        u = next((h for h in hs if h in wanted), hs[0] if hs else "")
+        fol = next((followers_map[h] for h in hs if followers_map.get(h)), 0)
+        if not u or not fol:
+            nofol += 1
+            continue
+        likes = int(p.get("likes") or p.get("topReactionsCount") or 0)
+        comments = int(p.get("comments") or 0)
+        video_url = _fb_video_url(p)
+        typenames = {m.get("__typename") for m in _fb_media(p)}
+        is_video = bool(p.get("isVideo") or video_url or "Video" in typenames
+                        or p.get("viewsCount") or "/reel/" in url or "/videos/" in url)
+        if is_video:
+            pt = "Reel" if "/reel/" in url else "Video"
+        elif len(_fb_media(p)) > 1:
+            pt = "Carousel"
+        else:
+            pt = "Image"
+        text = p.get("text") or ""
+        tags = [w.lstrip("#") for w in text.split() if w.startswith("#") and len(w) > 1]
+        by_comp.setdefault(u, []).append(_rec({
+            "post_id": "fb_" + pid,   # prefix: never collides with an IG shortcode
+            "tracker": TRACKER,
+            "competitor": u,
+            "caption": text[:5000],
+            "post_type": pt,
+            "likes": likes,
+            "comments": comments,
+            "followers": fol,
+            "post_date": parse_date(p.get("time") or p.get("timestamp")),
+            "post_url": url,
+            "thumbnail_url": _fb_thumb(p),
+            "video_url": video_url,
+            "hashtags": ", ".join(dict.fromkeys(tags)),
+            "is_video": is_video,
+            "last_synced": today,
+        }))
+    return by_comp, nofol, broken
+
+
+def to_rows(by_comp, nofol, broken):
+    """Judge each account against ITSELF, and guarantee every account
+    contributes its best few posts."""
     rows, below_total, rescued_total = [], 0, 0
     print(f"  {'账号':<24}{'抓到':>5}{'入选':>5}{'补位':>5}  基准/中位互动")
     for u in sorted(by_comp):
@@ -355,29 +500,41 @@ def main():
           f"engagements>={OUTLIER_X}x own median | floor {MIN_ENGAGE} | "
           f"keep {TOP_N_PER_COMP}-{MAX_PER_COMP} per account")
 
-    profiles = run_actor(token, "apify~instagram-profile-scraper",
-                         {"usernames": names}, "Step 1 profiles")
-    followers = {}
-    for pr in profiles:
-        u = (pr.get("username") or "").lower().strip()
-        c = pr.get("followersCount") or pr.get("followers") or 0
-        if u and c:
-            followers[u] = int(c)
-    print(f"  followers for {len(followers)}/{len(names)}")
-
-    try:
-        suggest_competitors(profiles)
-    except Exception as exc:
-        print(f"[Suggest] skipped ({exc})")
-
-    posts = run_actor(token, "apify~instagram-post-scraper",
-                      {"username": names, "resultsLimit": RESULTS_LIMIT,
-                       "onlyPostsNewerThan": f"{DAYS_BACK} days"}, "Step 2 posts")
-    print(f"  scraped {len(posts)} posts (last {DAYS_BACK} days, "
-          f"<= {RESULTS_LIMIT}/account)")
-
     today = datetime.now(timezone.utc).date().isoformat()
-    rows = to_rows(posts, followers, today)
+    if TRACKER == "FB":
+        start_urls = [{"url": fb_page_url(n)} for n in names]
+        pages = run_actor(token, "apify~facebook-pages-scraper",
+                          {"startUrls": start_urls}, "Step 1 FB pages")
+        followers = fb_followers(pages)
+        print(f"  followers for {sum(1 for n in names if followers.get(n))}/{len(names)}")
+        posts = run_actor(token, "apify~facebook-posts-scraper",
+                          {"startUrls": start_urls, "resultsLimit": FB_RESULTS_LIMIT,
+                           "onlyPostsNewerThan": f"{DAYS_BACK} days"}, "Step 2 FB posts")
+        print(f"  scraped {len(posts)} posts (last {DAYS_BACK} days, "
+              f"<= {FB_RESULTS_LIMIT}/page)")
+        rows = to_rows(*fb_records(posts, followers, names, today))
+    else:
+        profiles = run_actor(token, "apify~instagram-profile-scraper",
+                             {"usernames": names}, "Step 1 profiles")
+        followers = {}
+        for pr in profiles:
+            u = (pr.get("username") or "").lower().strip()
+            c = pr.get("followersCount") or pr.get("followers") or 0
+            if u and c:
+                followers[u] = int(c)
+        print(f"  followers for {len(followers)}/{len(names)}")
+
+        try:
+            suggest_competitors(profiles)
+        except Exception as exc:
+            print(f"[Suggest] skipped ({exc})")
+
+        posts = run_actor(token, "apify~instagram-post-scraper",
+                          {"username": names, "resultsLimit": RESULTS_LIMIT,
+                           "onlyPostsNewerThan": f"{DAYS_BACK} days"}, "Step 2 posts")
+        print(f"  scraped {len(posts)} posts (last {DAYS_BACK} days, "
+              f"<= {RESULTS_LIMIT}/account)")
+        rows = to_rows(*ig_records(posts, followers, today))
     if rows:
         for i in range(0, len(rows), 100):
             sb("posts?on_conflict=post_id", method="POST", data=rows[i:i+100],
